@@ -1,4 +1,5 @@
-import {defs, tiny} from './examples/common.js';
+import { defs, tiny } from './examples/common.js';
+import { Obj_File_Demo, Shape_From_File } from "./examples/obj-file-demo.js"
 
 const {
     Vector, Vector3, vec, vec3, vec4, color, hex_color, Matrix, Mat4, Light, Shape, Material, Scene,
@@ -86,6 +87,8 @@ class Base_Scene extends Scene {
             'outline': new Cube_Outline(),
             'cube_from_triangles': new Cube_From_Triangles(),
             sphere: new defs.Subdivision_Sphere(4),
+            cylinder: new defs.Capped_Cylinder(10, 10),
+            star: new Shape_From_File("assets/Star.obj")
         };
 
         // *** Materials
@@ -113,8 +116,13 @@ class Base_Scene extends Scene {
         this.shape_cube = true;
         this.shape_sphere = this.shape_cylinder = this.shape_star = false;
 
-        this.dt_sum = 0;
         this.dist_multiplier = 1;
+        this.max = 50;
+        this.min = 0;
+
+        this.dt_sum = 0;
+        this.progress = true;
+        this.fft = [];
 
         const playAudio = () => {
             var audio = new Audio('manymen.wav');
@@ -134,6 +142,14 @@ class Base_Scene extends Scene {
         // some initial setup.
 
         // Setup -- This part sets up the scene's overall camera matrix, projection matrix, and lights:
+        this.mousep = { "from_center": vec(0, 0) };
+        const mouse_position = (e, rect = context.canvas.getBoundingClientRect()) =>
+            vec(e.clientX - (rect.left + rect.right) / 2, e.clientY - (rect.bottom + rect.top) / 2);
+        context.canvas.addEventListener("mousedown", e => {
+            //console.log(mouse_position(e))
+            e.preventDefault();
+            this.mousep.anchor = mouse_position(e);
+        });
         if (!context.scratchpad.controls) {
             this.children.push(context.scratchpad.controls = new defs.Movement_Controls());
             // Define the global camera and projection matrices, which are stored in program_state.
@@ -217,6 +233,34 @@ export class Assignment2 extends Base_Scene {
         this.circle = false;
         this.regular = true;
     }
+
+    toggle_cube() {
+        this.shape_cube = true;
+        this.shape_sphere = false;
+        this.shape_cylinder = false;
+        this.shape_stars = false;
+    }
+
+    toggle_sphere() {
+        this.shape_cube = false;
+        this.shape_sphere = true;
+        this.shape_cylinder = false;
+        this.shape_stars = false;
+    }
+
+    toggle_cylinder() {
+        this.shape_cube = false;
+        this.shape_sphere = false;
+        this.shape_cylinder = true;
+        this.shape_stars = false;
+    }
+
+    toggle_stars() {
+        this.shape_cube = false;
+        this.shape_sphere = false;
+        this.shape_cylinder = false;
+        this.shape_star = true;
+    }
     
     make_control_panel() {
         // Draw the scene's buttons, setup their actions and keyboard shortcuts, and monitor live measurements.
@@ -228,26 +272,61 @@ export class Assignment2 extends Base_Scene {
         // customizer keys
         // shapes
         this.new_line();
-        this.key_triggered_button("Cubes", ["4"], this.shape_cube);
-        this.key_triggered_button("Spheres", ["5"], this.shape_sphere);
-        this.key_triggered_button("Cylinders", ["6"], this.shape_cylinder);
-        this.key_triggered_button("Stars", ["7"], this.shape_star);
+        this.key_triggered_button("Cubes", ["4"], this.toggle_cube);
+        this.key_triggered_button("Spheres", ["5"], this.toggle_sphere);
+        this.key_triggered_button("Cylinders", ["6"], this.toggle_cylinder);
+        this.key_triggered_button("Stars", ["7"], this.toggle_stars);
         // space between guys
         this.new_line();
         const dist_controls = this.control_panel.appendChild(document.createElement("span"));
-        dist_controls.style.margin = "30px";
-        this.key_triggered_button("-", [","], () =>
+        dist_controls.style.margin = "80px";
+        this.key_triggered_button("-", ["-"], () =>
             this.dist_multiplier /= 1.2, undefined, undefined, undefined, dist_controls);
         this.live_string(box => {
             box.textContent = " Distance Between Shapes: " + this.dist_multiplier.toFixed(2) + " ";
         }, dist_controls);
-        this.key_triggered_button("+", ["."], () =>
+        this.key_triggered_button("+", ["="], () =>
             this.dist_multiplier *= 1.2, undefined, undefined, undefined, dist_controls);
+        // max
+        this.new_line();
+        const max_controls = this.control_panel.appendChild(document.createElement("span"));
+        max_controls.style.margin = "115px";
+        this.key_triggered_button("-", ["["], () =>
+            this.max -= 1, undefined, undefined, undefined, max_controls);
+        this.live_string(box => {
+            box.textContent = " Maximum Size: " + this.max.toFixed(2) + " ";
+        }, max_controls);
+        this.key_triggered_button("+", ["]"], () =>
+            this.max += 1, undefined, undefined, undefined, max_controls);
+        // min
+        this.new_line();
+        const min_controls = this.control_panel.appendChild(document.createElement("span"));
+        min_controls.style.margin = "115px";
+        this.key_triggered_button("-", [";"], () =>
+            this.min -= 1, undefined, undefined, undefined, min_controls);
+        this.live_string(box => {
+            box.textContent = " Minimum Size: " + this.min.toFixed(2) + " ";
+        }, min_controls);
+        this.key_triggered_button("+", ["'"], () =>
+            this.min += 1, undefined, undefined, undefined, min_controls);
     }
 
-    draw_box(context, program_state, model_transform, box_num) {
-        this.shapes.cube.draw(context, program_state, model_transform, this.materials.plastic.override({color:this.colors[box_num]}));
-        model_transform = model_transform.times(Mat4.translation(-2, 0, 0));
+    draw_shape(context, program_state, model_transform, box_num) {
+        if (this.shape_cube)
+            this.shapes.cube.draw(context, program_state, model_transform, this.materials.plastic.override({ color: this.colors[box_num] }));
+        else if (this.shape_sphere)
+            this.shapes.sphere.draw(context, program_state, model_transform, this.materials.plastic.override({ color: this.colors[box_num] }));
+        else if (this.shape_cylinder) {
+            if (this.regular)
+                model_transform = model_transform.times(Mat4.rotation(Math.PI / 2, 1, 0, 0))
+            this.shapes.cylinder.draw(context, program_state, model_transform, this.materials.plastic.override({ color: this.colors[box_num] }));
+        }
+        else if (this.shape_star) {
+            if (this.galaxy)
+                model_transform = model_transform.times(Mat4.rotation(Math.PI / 2, 1, 0, 0))
+            this.shapes.star.draw(context, program_state, model_transform, this.materials.plastic.override({ color: this.colors[box_num] }));
+            //model_transform = model_transform.times(Mat4.translation(-2, 0, 0));
+        }
         return model_transform;
     }
 
@@ -259,32 +338,39 @@ export class Assignment2 extends Base_Scene {
 
         let offset = 0;
 
-        //let prev_t = this.t;
+        let prev_t = this.t;
         var t = this.t = program_state.animation_time / 1000, dt = program_state.animation_delta_time / 1000;
-        //if (this.dt_sum < 0.035 - 0.005) {
-        //    t = prev_t;
-        //    this.dt_sum += dt;
-        //}
-        //else {
-        //    console.log(this.dt_sum);
-        //    this.dt_sum = 0;
-        //}
+        console.log(dt)
+        if (this.dt_sum < 0.034 - 0.005) {
+            this.progress = false;
+            //console.log(this.dt_sum);
+            t = prev_t;
+            this.dt_sum += dt;
+        }
+        else {
+            this.progress = true;
+            console.log("progress: " + dt);
+            this.dt_sum = 0;
+        }
         
         try {
             if (this.isRunning) {
-
-                var fft_sig = this.signal.splice(0, 25);
-                //console.log(fft_sig);
+                if (this.progress) {
+                    console.log("dt sum: " + this.dt_sum);
+                    var fft_sig = this.signal.splice(0, 25);
+                    this.fft = fft_sig;
+                }
+               // console.log(dt);
                 if (this.regular) {
                     for (var box_num = 0; box_num < 25; box_num++) {
                         let model_transform = Mat4.identity();
                         var scaling_matrix = Mat4.identity()
-                        scaling_matrix[1][1] = 0.66 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2))
+                        scaling_matrix[1][1] = Math.max(this.min, Math.min(this.max,0.66 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2))))
                         scaling_matrix[0][0] = 1
                         scaling_matrix[2][2] = 2
-                        model_transform = model_transform.times(Mat4.translation(12.5 - box_num, 0, 0));
+                        model_transform = model_transform.times(Mat4.translation(this.dist_multiplier*(12.5 - box_num), 0, 0));
                         model_transform = model_transform.times(scaling_matrix);
-                        model_transform = this.draw_box(context, program_state, model_transform, box_num);
+                        model_transform = this.draw_shape(context, program_state, model_transform, box_num);
                     }
                 }
 
@@ -294,14 +380,15 @@ export class Assignment2 extends Base_Scene {
                         var theta = 2 * Math.PI * box_num / 25 + theta_plus;
                         let model_transform = Mat4.identity();
                         var scaling_matrix = Mat4.identity();
-                        var mag = this.weights[box_num] * 0.5 * (fft_sig[box_num] + 0.2);
-                        scaling_matrix[0][0] = this.weights[box_num] * 0.5 * (fft_sig[box_num] + 0.2)
+                        var mag = Math.min(this.max, this.weights[box_num] * 0.5 * (this.fft[box_num] + 0.2));
+                        scaling_matrix[0][0] = Math.min(this.max, this.weights[box_num] * 0.5 * (this.fft[box_num] + 0.2))
                         //scaling_matrix[0][0] = 0.5
                         //model_transform = model_transform.times(scaling_matrix);
                         model_transform = model_transform.times(Mat4.rotation(theta, 0, 0, 1))
-                        model_transform = model_transform.times(Mat4.translation(8 + mag, 0, 0));
+                        model_transform = model_transform.times(Mat4.translation((this.dist_multiplier * 8 + mag), 0, 0));
                         model_transform = model_transform.times(scaling_matrix);
-                        model_transform = this.draw_box(context, program_state, model_transform, box_num);
+                        model_transform = model_transform.times(Mat4.rotation(Math.PI / 2, 1, 0, 0));
+                        model_transform = this.draw_shape(context, program_state, model_transform, box_num);
                     }
                 }
                 if (this.galaxy) {
@@ -309,123 +396,60 @@ export class Assignment2 extends Base_Scene {
                     var scaling_matrix = Mat4.identity()
                     let model_transform = Mat4.identity();
                     let angle = 0;
-                    scaling_matrix[1][1] = Math.min(1.5, 0.0066 * 5 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                    scaling_matrix[0][0] = Math.min(1.5, 0.0066 * 5 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                    scaling_matrix[2][2] = Math.min(1.5, 0.0066 * 5 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
+                    scaling_matrix[1][1] = Math.min(this.max * 0.05, 0.0066 * 5 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
+                    scaling_matrix[0][0] = Math.min(this.max * 0.05, 0.0066 * 5 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
+                    scaling_matrix[2][2] = Math.min(this.max * 0.05, 0.0066 * 5 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
                     model_transform = model_transform.times(scaling_matrix);
-                    this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    for (var box_num = 0; box_num < 13; box_num++) {
+                    this.draw_shape(context, program_state, model_transform, box_num);
+                    for (var box_num = 1; box_num < 13; box_num++) {
                         model_transform = Mat4.identity();
-                        angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        model_transform = model_transform.times(Mat4.rotation(angle, 0, 0, 1));
-                        model_transform = model_transform.times(Mat4.translation(2.5 * (13 - box_num), 0, 0));
+                        let model_transform1 = Mat4.identity();
+                        let model_transform2 = Mat4.identity();
+                        let model_transform3 = Mat4.identity();
+                        let model_transform4 = Mat4.identity();
+                        let model_transform5 = Mat4.identity();
+                        let model_transform6 = Mat4.identity();
+                        let model_transform7 = Mat4.identity();
+                        let model_transform8 = Mat4.identity();
+
+                        model_transform = model_transform.times(Mat4.translation(this.dist_multiplier * 2.5 * (13 - box_num), 0, 0));
                         model_transform = model_transform.times(scaling_matrix);
-                        console.log(model_transform);
-                        this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    }
-                    for (var box_num = 0; box_num < 13; box_num++) {
-                        model_transform = Mat4.identity();
+
                         angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        model_transform = model_transform.times(Mat4.rotation(angle + Math.PI, 0, 0, 1));
-                        model_transform = model_transform.times(Mat4.translation(2.5 * (13 - box_num), 0, 0));
-                        model_transform = model_transform.times(scaling_matrix);
-                        console.log(model_transform);
-                        this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
+                        scaling_matrix[1][1] = Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
+                        scaling_matrix[0][0] = Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
+                        scaling_matrix[2][2] = Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
+
+                        model_transform1 = model_transform1.times(Mat4.rotation(angle, 0, 0, 1));
+                        model_transform1 = model_transform1.times(model_transform);
+                        this.draw_shape(context, program_state, model_transform1, box_num);
+                        model_transform2 = model_transform2.times(Mat4.rotation(angle + Math.PI, 0, 0, 1));
+                        model_transform2 = model_transform2.times(model_transform);
+                        this.draw_shape(context, program_state, model_transform2, box_num);
+                        model_transform3 = model_transform3.times(Mat4.rotation(angle + Math.PI / 2, 0, 0, 1));
+                        model_transform3 = model_transform3.times(model_transform);
+                        this.draw_shape(context, program_state, model_transform3, box_num);
+                        model_transform4 = model_transform4.times(Mat4.rotation(angle + 3 * Math.PI / 2, 0, 0, 1));
+                        model_transform4 = model_transform4.times(model_transform);
+                        this.draw_shape(context, program_state, model_transform4, box_num);
+                        model_transform5 = model_transform5.times(Mat4.rotation(angle + 3 * Math.PI / 4, 0, 0, 1));
+                        model_transform5 = model_transform5.times(model_transform);
+                        this.draw_shape(context, program_state, model_transform5, box_num);
+                        model_transform6 = model_transform6.times(Mat4.rotation(angle + 5 * Math.PI / 4, 0, 0, 1));
+                        model_transform6 = model_transform6.times(model_transform);
+                        this.draw_shape(context, program_state, model_transform6, box_num);
+                        model_transform7 = model_transform7.times(Mat4.rotation(angle + 7 * Math.PI / 4, 0, 0, 1));
+                        model_transform7 = model_transform7.times(model_transform);
+                        this.draw_shape(context, program_state, model_transform7, box_num);
+                        model_transform8 = model_transform8.times(Mat4.rotation(angle + Math.PI / 4, 0, 0, 1));
+                        model_transform8 = model_transform8.times(model_transform);
+                        this.draw_shape(context, program_state, model_transform8, box_num);
                     }
-                    for (var box_num = 0; box_num < 13; box_num++) {
-                        model_transform = Mat4.identity();
-                        angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        model_transform = model_transform.times(Mat4.rotation(angle + Math.PI / 2, 0, 0, 1));
-                        model_transform = model_transform.times(Mat4.translation(2.5 * (13 - box_num), 0, 0));
-                        model_transform = model_transform.times(scaling_matrix);
-                        console.log(model_transform);
-                        this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    }
-                    for (var box_num = 0; box_num < 13; box_num++) {
-                        model_transform = Mat4.identity();
-                        angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        model_transform = model_transform.times(Mat4.rotation(angle + 3*Math.PI / 2, 0, 0, 1));
-                        model_transform = model_transform.times(Mat4.translation(2.5 * (13 - box_num), 0, 0));
-                        model_transform = model_transform.times(scaling_matrix);
-                        console.log(model_transform);
-                        this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    }
-                    for (var box_num = 0; box_num < 13; box_num++) {
-                        model_transform = Mat4.identity();
-                        angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        model_transform = model_transform.times(Mat4.rotation(angle + 3 * Math.PI / 4, 0, 0, 1));
-                        model_transform = model_transform.times(Mat4.translation(2.5 * (13 - box_num), 0, 0));
-                        model_transform = model_transform.times(scaling_matrix);
-                        console.log(model_transform);
-                        this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    }
-                    for (var box_num = 0; box_num < 13; box_num++) {
-                        model_transform = Mat4.identity();
-                        angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        model_transform = model_transform.times(Mat4.rotation(angle + 5 * Math.PI / 4, 0, 0, 1));
-                        model_transform = model_transform.times(Mat4.translation(2.5 * (13 - box_num), 0, 0));
-                        model_transform = model_transform.times(scaling_matrix);
-                        console.log(model_transform);
-                        this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    }
-                    for (var box_num = 0; box_num < 13; box_num++) {
-                        model_transform = Mat4.identity();
-                        angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        model_transform = model_transform.times(Mat4.rotation(angle + 7 * Math.PI / 4, 0, 0, 1));
-                        model_transform = model_transform.times(Mat4.translation(2.5 * (13 - box_num), 0, 0));
-                        model_transform = model_transform.times(scaling_matrix);
-                        console.log(model_transform);
-                        this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    }
-                    for (var box_num = 0; box_num < 13; box_num++) {
-                        model_transform = Mat4.identity();
-                        angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                        model_transform = model_transform.times(Mat4.rotation(angle + Math.PI / 4, 0, 0, 1));
-                        model_transform = model_transform.times(Mat4.translation(2.5 * (13 - box_num), 0, 0));
-                        model_transform = model_transform.times(scaling_matrix);
-                        console.log(model_transform);
-                        this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    }
-                    //for (var box_num = 14; box_num < 25; box_num++) {
-                    //    model_transform = Mat4.identity();
-                    //    angle = 2 * Math.PI - Math.log((box_num + 1 - 13) * t);
-                    //    scaling_matrix[1][1] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                    //    scaling_matrix[0][0] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                    //    scaling_matrix[2][2] = Math.min(0.5, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (fft_sig[box_num] + 0.2)))
-                    //    model_transform = model_transform.times(Mat4.rotation(angle + Math.PI, 0, 0, 1));
-                    //    model_transform = model_transform.times(Mat4.translation(2.5 * Math.abs(13 - box_num), 0, 0));
-                    //    model_transform = model_transform.times(scaling_matrix);
-                    //    this.shapes.sphere.draw(context, program_state, model_transform, this.materials.sun.override({ color: this.colors[box_num] }));
-                    //}
                 }
                 //console.log(t);
             }
         } catch (e) {
-            console.log(e);
+            //console.log(e);
         }
         // TODO:  Draw your entire scene here.  Use this.draw_box( graphics_state, model_transform ) to call your helper.
         this.counter += 1;
