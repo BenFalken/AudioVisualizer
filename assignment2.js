@@ -99,12 +99,14 @@ class Base_Scene extends Scene {
                 { ambient: 1, diffusivity: 0, color: hex_color("#ffffff") }),
         };
         // The white material and basic shader are used for drawing the outline.
+        this.path = 'jellyfish_jam.wav';
         this.white = new Material(new defs.Basic_Shader());
         this.colors = this.generate_rand_colors()
         this.weights = this.generate_weights()
         this.outline_cubes = false;
         this.time_paused = false;
         this.read_file();
+        this.read_path();
         this.sig_buffer = [];
         this.counter = 0;
         this.sig_window = [];
@@ -125,7 +127,7 @@ class Base_Scene extends Scene {
         this.fft = [];
 
         const playAudio = () => {
-            var audio = new Audio('manymen.wav');
+            var audio = new Audio(this.path);
             console.log("LALALALALLALALALALALLALAAAAAA");
             audio.play();
             this.isRunning = true;
@@ -198,6 +200,14 @@ class Base_Scene extends Scene {
                 // Now you can use the 'content' variable as needed
             })
             .catch(error => console.error('Error reading file:', error));
+    }
+
+    read_path() {
+        fetch('path.txt')
+            .then(response => response.text())
+            .then(path => {
+                this.path = path;
+            })
     }
     
     flip_outline_cubes() {
