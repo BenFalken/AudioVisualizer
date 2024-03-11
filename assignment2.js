@@ -1,9 +1,15 @@
-import { defs, tiny } from './examples/common.js';
+import {defs, tiny} from './examples/common.js';
+
 import { Obj_File_Demo, Shape_From_File } from "./examples/obj-file-demo.js"
 
+import { Text_Line } from "./examples/text-demo.js"
+
+
 const {
-    Vector, Vector3, vec, vec3, vec4, color, hex_color, Matrix, Mat4, Light, Shape, Material, Scene,
+    Vector, Vector3, vec, vec3, vec4, color, hex_color, Matrix, Mat4, Light, Shape, Material, Scene, Texture
 } = tiny;
+
+const {Textured_Phong} = defs
 
 class Cube extends Shape {
     constructor() {
@@ -86,23 +92,45 @@ class Base_Scene extends Scene {
             'cube': new Cube(),
             'outline': new Cube_Outline(),
             'cube_from_triangles': new Cube_From_Triangles(),
-            sphere: new defs.Subdivision_Sphere(4),
-            cylinder: new defs.Capped_Cylinder(10, 10),
-            star: new Shape_From_File("assets/Star.obj")
+            'play_sphere': new defs.Subdivision_Sphere(4),
+            'sphere': new defs.Subdivision_Sphere(4),
+            'cylinder': new defs.Capped_Cylinder(10, 10),
+            'star': new Shape_From_File("assets/Star.obj"),
+            'text': new Text_Line(35)
         };
 
         // *** Materials
         this.materials = {
             plastic: new Material(new defs.Phong_Shader(),
-                { ambient: .4, diffusivity: .6, color: hex_color("#ffffff") }),
+                {ambient: .4, diffusivity: .6, color: hex_color("#ffffff")}),
             sun: new Material(new defs.Phong_Shader(),
                 { ambient: 1, diffusivity: 0, color: hex_color("#ffffff") }),
+            play_button: new Material(new Textured_Phong(), {
+                    color: hex_color("#000000"),
+                    ambient: 0.9, 
+                    texture: new Texture("assets/play_button.png", "NEAREST")
+                }),
+            text_image: new Material(new defs.Textured_Phong(1), {
+                    color: hex_color("#000000"),
+                    ambient: 0, diffusivity: 0, specularity: 0,
+                    texture: new Texture("assets/text.png")
+            })
         };
         // The white material and basic shader are used for drawing the outline.
         this.path = 'jellyfish_jam.wav';
         this.white = new Material(new defs.Basic_Shader());
+        this.isRunning = false;
+
+        this.color_max = [1, 0, 0.5];
+        this.color_min = [0, 1, 0.9];
+
+        this.center_color = [1, 0, 0];
+        this.fringe_color = [0, 1, 0];
+
         this.colors = this.generate_rand_colors()
+
         this.weights = this.generate_weights()
+
         this.outline_cubes = false;
         this.time_paused = false;
         this.read_file();
@@ -110,13 +138,12 @@ class Base_Scene extends Scene {
         this.sig_buffer = [];
         this.counter = 0;
         this.sig_window = [];
-        this.isRunning = false;
 
         this.circle = this.galaxy = false;
         this.regular = true;
 
-        this.shape_cube = true;
-        this.shape_sphere = this.shape_cylinder = this.shape_star = false;
+        this.shape_cylinder = true;
+        this.shape_sphere = this.shape_cube = this.shape_star = false;
 
         this.dist_multiplier = 1;
         this.max = 50;
@@ -126,37 +153,100 @@ class Base_Scene extends Scene {
         this.progress = true;
         this.fft = [];
 
+        this.mouse_was_just_clicked = false;
+        this.mouse_pos = null;
+
+        this.current_pos = Mat4.translation(0, 0, -30);
+
+        this.averaged_mags = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+
+        /*
         const playAudio = () => {
-            var audio = new Audio(this.path);
+            var audio = new Audio('jellyfish_jam.wav');
             console.log("LALALALALLALALALALALLALAAAAAA");
             audio.play();
             this.isRunning = true;
             console.log(this.isRunning);
         };
+        */
         
         // Add a click event listener to the div
-        document.getElementById('playButton').addEventListener('click', playAudio);
+        //document.getElementById('playButton').addEventListener('click', playAudio);
         
     }
+
+    playAudio() {
+        var audio = new Audio(this.path);
+        console.log("LALALALALLALALALALALLALAAAAAA");
+        audio.play();
+        this.isRunning = true;
+        console.log(this.isRunning);
+    };
+
+    read_path() {
+        fetch('path.txt')
+            .then(response => response.text())
+            .then(path => {
+                this.path = path;
+            })
+    };
 
     display(context, program_state) {
         // display():  Called once per frame of animation. Here, the base class's display only does
         // some initial setup.
 
+        this.mouse_main = {"from_center": vec(0, 0)};
+            const mouse_position = (e, rect = context.canvas.getBoundingClientRect()) =>
+                vec(e.clientX - (rect.left + rect.right) / 2, e.clientY - (rect.bottom + rect.top) / 2);
+            // Set up mouse response.  The last one stops us from reacting if the mouse leaves the canvas:
+            document.addEventListener("mouseup", e => {
+                this.mouse_main.anchor = undefined;
+            });
+            context.canvas.addEventListener("mousedown", e => {
+                e.preventDefault();
+                var new_pos = mouse_position(e);
+                var new_x = new_pos[0];
+                var new_y = new_pos[1];
+                if (!this.isRunning) {
+                    if (Math.abs(new_x) < 50 && Math.abs(new_y) < 50) {
+                        this.playAudio();
+                    }
+                }
+                if (this.mouse_pos == null || new_x != this.mouse_pos[0] || new_y != this.mouse_pos[1]) {
+                    this.mouse_pos = new_pos;
+                    this.mouse_was_just_clicked == true
+                    if (Math.abs(this.mouse_pos[0]) < 50) {
+                        this.center_color = [0.25*Math.random()+0.75, 0.75*Math.random()+0.25, 0];
+                        this.colors = this.generate_rand_colors()
+                        for (let i = 0; i <3; i++) {
+                            this.color_max[i] = this.center_color[i]
+                        }
+                    }
+                    if (Math.abs(this.mouse_pos[0]) > 150 && Math.abs(this.mouse_pos[1]) < 50) {
+                        this.fringe_color = [0, 0.25*Math.random()+0.75, 0.75*Math.random()+0.25];
+                        this.colors = this.generate_rand_colors()
+                        for (let i = 0; i <3; i++) {
+                            this.color_min[i] = this.fringe_color[i]
+                            if (i == 2) {
+                                this.color_min[i] += 0.7;
+                            }
+                        }
+                    }
+                } else {
+                    this.mouse_was_just_clicked = false;    
+                }
+                
+                
+                //this.mouse_main.anchor = mouse_position(e);
+            });
+
         // Setup -- This part sets up the scene's overall camera matrix, projection matrix, and lights:
-        this.mousep = { "from_center": vec(0, 0) };
-        const mouse_position = (e, rect = context.canvas.getBoundingClientRect()) =>
-            vec(e.clientX - (rect.left + rect.right) / 2, e.clientY - (rect.bottom + rect.top) / 2);
-        context.canvas.addEventListener("mousedown", e => {
-            //console.log(mouse_position(e))
-            e.preventDefault();
-            this.mousep.anchor = mouse_position(e);
-        });
         if (!context.scratchpad.controls) {
             this.children.push(context.scratchpad.controls = new defs.Movement_Controls());
             // Define the global camera and projection matrices, which are stored in program_state.
-            program_state.set_camera(Mat4.translation(0, 0, -30));
+            program_state.set_camera(this.current_pos);
         }
+        
         program_state.projection_transform = Mat4.perspective(
             Math.PI / 4, context.width / context.height, 1, 100);
 
@@ -167,10 +257,11 @@ class Base_Scene extends Scene {
 
     generate_rand_colors() {
         let colors = []
+        //console.log(this.fringe_color, this.center_color);
         for (let i = 0; i < 25; i++) {
-            var red_component = Math.pow(2, -1*Math.pow(12.5-i, 2)/10)
-            var blue_component = 1 - Math.pow(2, -1*Math.pow(12.5-i, 2)/10)
-            var green_component = 0;
+            var red_component = this.fringe_color[0] + (this.center_color[0] - this.fringe_color[0]) * Math.pow(2, -1*Math.pow(12.5-i, 2)/10);
+            var blue_component = this.fringe_color[1] + (this.center_color[1] - this.fringe_color[1]) * Math.pow(2, -1*Math.pow(12.5-i, 2)/10);
+            var green_component =this.fringe_color[2] + (this.center_color[2] - this.fringe_color[2]) * Math.pow(2, -1*Math.pow(12.5-i, 2)/10);
             colors.push([red_component, green_component, blue_component, 1]);
         }
         return colors;
@@ -200,14 +291,6 @@ class Base_Scene extends Scene {
                 // Now you can use the 'content' variable as needed
             })
             .catch(error => console.error('Error reading file:', error));
-    }
-
-    read_path() {
-        fetch('path.txt')
-            .then(response => response.text())
-            .then(path => {
-                this.path = path;
-            })
     }
     
     flip_outline_cubes() {
@@ -273,52 +356,52 @@ export class Assignment2 extends Base_Scene {
     }
     
     make_control_panel() {
-        // Draw the scene's buttons, setup their actions and keyboard shortcuts, and monitor live measurements.
-        this.key_triggered_button("Circular Setting", ["c"], this.toggle_circle);
-        // Add a button for controlling the scene.
-        this.key_triggered_button("Regular Setting", ["p"], this.toggle_regular);
-        this.key_triggered_button("Galaxy Mode", ["g"], this.toggle_planetary);
-            // TODO:  Requirement 5b:  Set a flag here that will toggle your outline on and off
-        // customizer keys
-        // shapes
-        this.new_line();
-        this.key_triggered_button("Cubes", ["4"], this.toggle_cube);
-        this.key_triggered_button("Spheres", ["5"], this.toggle_sphere);
-        this.key_triggered_button("Cylinders", ["6"], this.toggle_cylinder);
-        this.key_triggered_button("Stars", ["7"], this.toggle_stars);
-        // space between guys
-        this.new_line();
-        const dist_controls = this.control_panel.appendChild(document.createElement("span"));
-        dist_controls.style.margin = "80px";
-        this.key_triggered_button("-", ["-"], () =>
-            this.dist_multiplier /= 1.2, undefined, undefined, undefined, dist_controls);
-        this.live_string(box => {
-            box.textContent = " Distance Between Shapes: " + this.dist_multiplier.toFixed(2) + " ";
-        }, dist_controls);
-        this.key_triggered_button("+", ["="], () =>
-            this.dist_multiplier *= 1.2, undefined, undefined, undefined, dist_controls);
-        // max
-        this.new_line();
-        const max_controls = this.control_panel.appendChild(document.createElement("span"));
-        max_controls.style.margin = "115px";
-        this.key_triggered_button("-", ["["], () =>
-            this.max -= 1, undefined, undefined, undefined, max_controls);
-        this.live_string(box => {
-            box.textContent = " Maximum Size: " + this.max.toFixed(2) + " ";
-        }, max_controls);
-        this.key_triggered_button("+", ["]"], () =>
-            this.max += 1, undefined, undefined, undefined, max_controls);
-        // min
-        this.new_line();
-        const min_controls = this.control_panel.appendChild(document.createElement("span"));
-        min_controls.style.margin = "115px";
-        this.key_triggered_button("-", [";"], () =>
-            this.min -= 1, undefined, undefined, undefined, min_controls);
-        this.live_string(box => {
-            box.textContent = " Minimum Size: " + this.min.toFixed(2) + " ";
-        }, min_controls);
-        this.key_triggered_button("+", ["'"], () =>
-            this.min += 1, undefined, undefined, undefined, min_controls);
+         // Draw the scene's buttons, setup their actions and keyboard shortcuts, and monitor live measurements.
+         this.key_triggered_button("Circular Setting", ["c"], this.toggle_circle);
+         // Add a button for controlling the scene.
+         this.key_triggered_button("Regular Setting", ["p"], this.toggle_regular);
+         this.key_triggered_button("Galaxy Mode", ["g"], this.toggle_planetary);
+             // TODO:  Requirement 5b:  Set a flag here that will toggle your outline on and off
+         // customizer keys
+         // shapes
+         this.new_line();
+         this.key_triggered_button("Cubes", ["4"], this.toggle_cube);
+         this.key_triggered_button("Spheres", ["5"], this.toggle_sphere);
+         this.key_triggered_button("Cylinders", ["6"], this.toggle_cylinder);
+         this.key_triggered_button("Stars", ["7"], this.toggle_stars);
+         // space between guys
+         this.new_line();
+         const dist_controls = this.control_panel.appendChild(document.createElement("span"));
+         dist_controls.style.margin = "80px";
+         this.key_triggered_button("-", ["-"], () =>
+             this.dist_multiplier /= 1.2, undefined, undefined, undefined, dist_controls);
+         this.live_string(box => {
+             box.textContent = " Distance Between Shapes: " + this.dist_multiplier.toFixed(2) + " ";
+         }, dist_controls);
+         this.key_triggered_button("+", ["="], () =>
+             this.dist_multiplier *= 1.2, undefined, undefined, undefined, dist_controls);
+         // max
+         this.new_line();
+         const max_controls = this.control_panel.appendChild(document.createElement("span"));
+         max_controls.style.margin = "115px";
+         this.key_triggered_button("-", ["["], () =>
+             this.max -= 1, undefined, undefined, undefined, max_controls);
+         this.live_string(box => {
+             box.textContent = " Maximum Size: " + this.max.toFixed(2) + " ";
+         }, max_controls);
+         this.key_triggered_button("+", ["]"], () =>
+             this.max += 1, undefined, undefined, undefined, max_controls);
+         // min
+         this.new_line();
+         const min_controls = this.control_panel.appendChild(document.createElement("span"));
+         min_controls.style.margin = "115px";
+         this.key_triggered_button("-", [";"], () =>
+             this.min -= 1, undefined, undefined, undefined, min_controls);
+         this.live_string(box => {
+             box.textContent = " Minimum Size: " + this.min.toFixed(2) + " ";
+         }, min_controls);
+         this.key_triggered_button("+", ["'"], () =>
+             this.min += 1, undefined, undefined, undefined, min_controls);
     }
 
     draw_shape(context, program_state, model_transform, box_num) {
@@ -342,15 +425,11 @@ export class Assignment2 extends Base_Scene {
 
     display(context, program_state) {
         super.display(context, program_state);
-        
-
-        const blue = hex_color("#1a9ffa");
-
-        let offset = 0;
 
         let prev_t = this.t;
         var t = this.t = program_state.animation_time / 1000, dt = program_state.animation_delta_time / 1000;
-        console.log(dt)
+        //console.log(dt)
+        /*
         if (this.dt_sum < 0.034 - 0.005) {
             this.progress = false;
             //console.log(this.dt_sum);
@@ -362,16 +441,26 @@ export class Assignment2 extends Base_Scene {
             console.log("progress: " + dt);
             this.dt_sum = 0;
         }
+        */
+       this.progress = true;
         
         try {
             if (this.isRunning) {
                 if (this.progress) {
-                    console.log("dt sum: " + this.dt_sum);
+                    //console.log("dt sum: " + this.dt_sum);
                     var fft_sig = this.signal.splice(0, 25);
                     this.fft = fft_sig;
                 }
-               // console.log(dt);
+
+                const average = array => array.reduce((a, b) => a + b) / array.length;
+                this.averaged_mags.pop();
+                this.averaged_mags.push(average(fft_sig));
+                var avg = average(this.averaged_mags);
+                var interplolated_color = color(this.color_min[0]*avg + this.color_max[0]*(1-avg), this.color_min[1]*avg + this.color_max[1]*(1-avg), this.color_min[2]*avg + this.color_max[2]*(1-avg), 1)
+
+
                 if (this.regular) {
+                    this.webgl_manager = new tiny.Webgl_Manager(context.canvas, interplolated_color);
                     for (var box_num = 0; box_num < 25; box_num++) {
                         let model_transform = Mat4.identity();
                         var scaling_matrix = Mat4.identity()
@@ -385,6 +474,7 @@ export class Assignment2 extends Base_Scene {
                 }
 
                 if (this.circle) {
+                    this.webgl_manager = new tiny.Webgl_Manager(context.canvas, interplolated_color);
                     for (var box_num = 0; box_num < 25; box_num++) {
                         var theta_plus = 0.25 * t;
                         var theta = 2 * Math.PI * box_num / 25 + theta_plus;
@@ -394,6 +484,7 @@ export class Assignment2 extends Base_Scene {
                         scaling_matrix[0][0] = Math.min(this.max, this.weights[box_num] * 0.5 * (this.fft[box_num] + 0.2))
                         //scaling_matrix[0][0] = 0.5
                         //model_transform = model_transform.times(scaling_matrix);
+                        model_transform = model_transform.times(Mat4.rotation(-0.8*Math.PI/2, 1, 0, 0))
                         model_transform = model_transform.times(Mat4.rotation(theta, 0, 0, 1))
                         model_transform = model_transform.times(Mat4.translation((this.dist_multiplier * 8 + mag), 0, 0));
                         model_transform = model_transform.times(scaling_matrix);
@@ -402,6 +493,7 @@ export class Assignment2 extends Base_Scene {
                     }
                 }
                 if (this.galaxy) {
+                    this.webgl_manager = new tiny.Webgl_Manager(context.canvas, color(0, 0, 0, 1));
                     var box_num = 13;
                     var scaling_matrix = Mat4.identity()
                     let model_transform = Mat4.identity();
@@ -456,12 +548,74 @@ export class Assignment2 extends Base_Scene {
                         this.draw_shape(context, program_state, model_transform8, box_num);
                     }
                 }
-                //console.log(t);
+            } else {
+                this.webgl_manager = new tiny.Webgl_Manager(context.canvas, color(0.8, 0.8, 1, 1));
+                let model_transform = Mat4.identity();
+                var scaling_matrix = Mat4.identity();
+                scaling_matrix[0][0] = 4;
+                scaling_matrix[1][1] = 4;
+                scaling_matrix[2][2] = 4;
+                model_transform = model_transform.times(scaling_matrix);
+                model_transform = model_transform.times(Mat4.rotation(0.4, 0, 0, 1));
+                model_transform = model_transform.times(Mat4.rotation(Math.PI + 2*t, 0, 1, 0));
+                
+                this.shapes.play_sphere.draw(context, program_state, model_transform, this.materials.play_button);
+                
+                var line = "Press Play Button to Start";
+                let text_transform = Mat4.identity();
+                text_transform = text_transform.times(Mat4.translation(-10, -7.5, 0));
+                this.shapes.text.set_string(line, context.context);
+                this.shapes.text.draw(context, program_state, text_transform.times(Mat4.scale(.5, .5, .5)), this.materials.text_image);
             }
         } catch (e) {
-            //console.log(e);
+            console.log(e);
         }
         // TODO:  Draw your entire scene here.  Use this.draw_box( graphics_state, model_transform ) to call your helper.
         this.counter += 1;
+    }
+}
+
+
+class Texture_Rotate extends Textured_Phong {
+    // TODO:  Modify the shader below (right now it's just the same fragment shader as Textured_Phong) for requirement #7.
+    fragment_glsl_code() {
+        return this.shared_glsl_code() + `
+            varying vec2 f_tex_coord;
+            uniform sampler2D texture;
+            uniform float animation_time;
+            void main(){
+                // Sample the texture image in the correct place:
+                float theta = 0.5 * 3.14159 * mod(animation_time, 4.); 
+                mat4 rotate_z_matrix = mat4(
+                                    vec4(cos(theta), sin(theta), 0., 0.), 
+                                    vec4(sin(theta), -cos(theta), 0., 0.), 
+                                    vec4( 0., 0., 1., 0.), 
+                                    vec4( 0., 0., 0., 1.));
+
+                vec4 new_tex_coord = rotate_z_matrix * (vec4(f_tex_coord, 0, 0) + vec4(-.5, -.5, 0., 0.)) + vec4(.5, .5, 0., 0.);
+                vec4 tex_color = texture2D(texture, new_tex_coord.xy);
+                
+                float u = mod(new_tex_coord.x, 1.0);
+                float v = mod(new_tex_coord.y, 1.0);
+
+                if (u > 0.15 && u < 0.25 && v > 0.15 && v < 0.85) {
+                     tex_color = vec4(0, 0, 0, 1.0);
+                }
+                if (u > 0.75 && u < 0.85 && v > 0.15 && v < 0.85) {
+                    tex_color = vec4(0, 0, 0, 1.0);
+                }
+                if (v > 0.15 && v < 0.25 && u > 0.15 && u < 0.85) {
+                    tex_color = vec4(0, 0, 0, 1.0);
+                }
+                if (v > 0.75 && v < 0.85 && u > 0.15 && u < 0.85) {
+                    tex_color = vec4(0, 0, 0, 1.0);
+                }
+
+                if( tex_color.w < .01 ) discard;
+                // Compute an initial (ambient) color:
+                gl_FragColor = vec4( ( tex_color.xyz + shape_color.xyz ) * ambient, shape_color.w * tex_color.w ); 
+                // Compute the final color with contributions from lights:
+                gl_FragColor.xyz += phong_model_lights( normalize( N ), vertex_worldspace );
+        } `;
     }
 }
