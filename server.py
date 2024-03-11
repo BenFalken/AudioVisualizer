@@ -12,6 +12,8 @@ path = ("")
 path = input("File path: ")
 while(os.path.exists(path) != True):
     path = input("File not found. Please try again: ")
+while(path.split(".")[1] != "wav"):
+    path = input("." + path.split(".")[1] + " not supported. Please try again:")
 with open('path.txt', 'w') as output:
     output.write(path)
  # load audio (just wav files atm), fs is the sampling freq. and y is both audio channels as an Nx2 matrix
