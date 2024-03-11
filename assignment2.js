@@ -426,9 +426,9 @@ export class Assignment2 extends Base_Scene {
                         model_transform = model_transform.times(scaling_matrix);
 
                         angle = 2 * Math.PI - Math.log((box_num + 1) * t);
-                        scaling_matrix[1][1] = Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
-                        scaling_matrix[0][0] = Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
-                        scaling_matrix[2][2] = Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2)))
+                        scaling_matrix[1][1] = Math.max(this.min, Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2))))
+                        scaling_matrix[0][0] = Math.max(this.min, Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2))))
+                        scaling_matrix[2][2] = Math.max(this.min, Math.min(this.max * 0.05, Math.abs(13 - box_num) * 0.012 * (2 * this.weights[box_num] * (this.fft[box_num] + 0.2))))
 
                         model_transform1 = model_transform1.times(Mat4.rotation(angle, 0, 0, 1));
                         model_transform1 = model_transform1.times(model_transform);
