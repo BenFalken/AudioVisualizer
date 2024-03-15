@@ -117,7 +117,6 @@ class Base_Scene extends Scene {
             })
         };
         // The white material and basic shader are used for drawing the outline.
-        this.path = 'jellyfish_jam.wav';
         this.white = new Material(new defs.Basic_Shader());
         this.isRunning = false;
 
@@ -133,8 +132,8 @@ class Base_Scene extends Scene {
 
         this.outline_cubes = false;
         this.time_paused = false;
-        this.read_file();
         this.read_path();
+        this.read_file();
         this.sig_buffer = [];
         this.counter = 0;
         this.sig_window = [];
@@ -160,6 +159,8 @@ class Base_Scene extends Scene {
 
         this.averaged_mags = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 
+        this.samp_rate = 44100;
+        this.res = 0;
         /*
         const playAudio = () => {
             var audio = new Audio('jellyfish_jam.wav');
@@ -423,38 +424,53 @@ export class Assignment2 extends Base_Scene {
         return model_transform;
     }
 
+    set_res(res) {
+        this.res = res
+    }
+
+    process_fft(chunk) {
+        console.log(this.path)
+        return new Promise(function (resolve, reject) { 
+            $.ajax({
+                type: 'POST',
+                url: "http://localhost:8000", // Update the URL to match your server address
+                data: JSON.stringify({param: chunk}), // Passing some input here
+                contentType: "application/json",
+                dataType: "json",
+                success: function(response) {
+                    var res = response.result
+                    //console.log(chunk[0])
+                    resolve(res)
+                    //console.log(res)
+                },
+                error: function(xhr, status, error) {
+                    console.error('Error:', error);
+                }
+            })
+        });
+    }
+
     display(context, program_state) {
         super.display(context, program_state);
 
         let prev_t = this.t;
         var t = this.t = program_state.animation_time / 1000, dt = program_state.animation_delta_time / 1000;
         //console.log(dt)
-        /*
-        if (this.dt_sum < 0.034 - 0.005) {
-            this.progress = false;
-            //console.log(this.dt_sum);
-            t = prev_t;
-            this.dt_sum += dt;
-        }
-        else {
-            this.progress = true;
-            console.log("progress: " + dt);
-            this.dt_sum = 0;
-        }
-        */
        this.progress = true;
         
         try {
             if (this.isRunning) {
-                if (this.progress) {
-                    //console.log("dt sum: " + this.dt_sum);
-                    var fft_sig = this.signal.splice(0, 25);
-                    this.fft = fft_sig;
-                }
+                var chunk = this.signal.splice(0, Math.floor(dt*this.samp_rate));
+                
+                this.process_fft(chunk).then((data) => {
+                    this.fft = data
+                })
+        
+                //console.log(this.fft)
 
                 const average = array => array.reduce((a, b) => a + b) / array.length;
                 this.averaged_mags.pop();
-                this.averaged_mags.push(average(fft_sig));
+                this.averaged_mags.push(average(this.fft));
                 var avg = average(this.averaged_mags);
                 var interplolated_color = color(this.color_min[0]*avg + this.color_max[0]*(1-avg), this.color_min[1]*avg + this.color_max[1]*(1-avg), this.color_min[2]*avg + this.color_max[2]*(1-avg), 1)
 
